@@ -1,0 +1,24 @@
+{
+    "name": "Arena Strike",
+    "short_name": "Arena Strike",
+    "description": "Tactical 2D top-down combat with campaign, progression and multiplayer fireteams.",
+    "start_url": "/",
+    "display": "standalone",
+    "orientation": "landscape",
+    "background_color": "#02050a",
+    "theme_color": "#071019",
+    "scope": "/",
+    "lang": "en",
+    "categories": [
+        "games",
+        "entertainment"
+    ],
+    "icons": [
+        {
+            "src": "/icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        }
+    ]
+}

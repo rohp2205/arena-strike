@@ -1,24 +1,6 @@
 "use client";
 
 /* ================================================================
-   STEP 40 // FINAL QA, PERFORMANCE & RELEASE HARDENING
-   ----------------------------------------------------------------
-   Final release pass for Arena Strike.
-
-   Release hardening includes:
-   - lightweight live FPS/performance telemetry
-   - production release metadata
-   - release-readiness status instrumentation
-   - lifecycle-safe presentation behavior
-
-   Existing gameplay, campaign, multiplayer authority, objectives,
-   bosses, weapons, maps, progression and controls remain intact.
-   No multiplayer server protocol or package dependency is changed.
-   ================================================================ */
-
-
-
-/* ================================================================
    STEP 39 // FINAL UI/UX & CAMPAIGN POLISH
    ----------------------------------------------------------------
    Adds the final presentation layer before release:
@@ -188,7 +170,7 @@ interface Particle {
 
 const getEnemyCountForWave = (
   wave: number,
-  levelNumber = selectedCampaignLevelRef.current
+  levelNumber = 1
 ) => {
   const difficulty = getCampaignLevel(levelNumber)?.difficulty?.toLowerCase();
 
@@ -228,7 +210,7 @@ const getWaveHealthBonus = (
 
 const getEnemyTypeForWave = (
   wave: number,
-  levelNumber = selectedCampaignLevelRef.current
+  levelNumber = 1
 ): EnemyType => {
   const random = Math.random();
   const difficulty = getCampaignLevel(levelNumber)?.difficulty?.toLowerCase();
@@ -393,7 +375,7 @@ type CombatAudioCue =
   | "objective";
 
 let combatAudioContext: AudioContext | null = null;
-let combatMusicTimer: ReturnType<typeof setInterval> | null = null;
+let combatMusicTimer: number | null = null;
 let combatMusicGain: GainNode | null = null;
 let combatAudioMuted = false;
 
@@ -624,9 +606,6 @@ const getUpgradeCost = (
    STEP 30 // PERSISTENT OPERATOR PROFILE
 ========================================================= */
 
-const ARENA_STRIKE_RELEASE = "1.0.0";
-const ARENA_STRIKE_RELEASE_CHANNEL = "PRODUCTION";
-
 const PROFILE_STORAGE_KEY = "arena-strike-profile-v1";
 
 type PersistentOperatorProfile = {
@@ -711,9 +690,21 @@ const buildDefaultProfile = (): PersistentOperatorProfile => ({
   weaponUpgrades: getDefaultWeaponUpgrades(),
 });
 
+const getSquadBearing = (fromX: number, fromY: number, toX: number, toY: number) => {
+  const angle = Math.atan2(toY - fromY, toX - fromX);
+  const degrees = (angle * 180) / Math.PI;
+  const normalized = (degrees + 360) % 360;
+  const cardinals = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"];
+  const index = Math.round(normalized / 45) % 8;
+  return { degrees: Math.round(normalized), cardinal: cardinals[index] };
+};
+
 /* =========================================================
    MAIN GAME
 ========================================================= */
+
+// STEP 40 // FINAL RELEASE HARDENING
+const ARENA_STRIKE_RELEASE = "1.0.0";
 
 export default function Home() {
   const canvasRef =
@@ -730,12 +721,6 @@ export default function Home() {
 
   const [score, setScore] =
     useState(0);
-
-  const [frameRate, setFrameRate] = useState(60);
-  const frameSampleRef = useRef({
-    startedAt: 0,
-    frames: 0,
-  });
 
   const [xp, setXp] = useState(STARTING_XP);
 
@@ -977,12 +962,11 @@ export default function Home() {
   ======================================================= */
   const [threatLevel, setThreatLevel] = useState(0);
   const [nearbyHostiles, setNearbyHostiles] = useState(0);
+  const [playerPosition, setPlayerPosition] = useState({ x: 0, y: 0 });
   const [tacticalMapExpanded, setTacticalMapExpanded] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
-  const campaignCompletionPercent =
-    Math.round(
-      (getCompletedCampaignLevels().length / TOTAL_LEVELS) * 100
-    );
+  const [mobileControlsEnabled, setMobileControlsEnabled] = useState(false);
+  const [mobileStick, setMobileStick] = useState({ x: 0, y: 0 });
 
   const lastThreatTelemetryRef = useRef(0);
 
@@ -1025,6 +1009,19 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const detectTouch = () => {
+      setMobileControlsEnabled(
+        window.matchMedia("(pointer: coarse)").matches ||
+        navigator.maxTouchPoints > 0
+      );
+    };
+    detectTouch();
+    window.addEventListener("resize", detectTouch);
+    return () => window.removeEventListener("resize", detectTouch);
+  }, []);
+
+  useEffect(() => {
     setCampaignSector(CAMPAIGN_SECTORS.findIndex((sector) => selectedCampaignLevel >= sector.range[0] && selectedCampaignLevel <= sector.range[1]));
   }, [selectedCampaignLevel]);
 
@@ -1052,6 +1049,10 @@ export default function Home() {
 
   const [levelStars, setLevelStars] =
     useState<Record<number, number>>({});
+
+  const campaignCompletionPercent = Math.round(
+    (completedLevels.length / 60) * 100
+  );
 
   const gameStateRef =
     useRef<GameState>(
@@ -1720,6 +1721,17 @@ export default function Home() {
 
   const openLevelSelect = () => {
     setShowLevelSelect(true);
+    setShowDeployment(false);
+    setShowArmory(false);
+    setShowOperatorProfile(false);
+    setShowLeaderboard(false);
+    setShowMultiplayer(false);
+  };
+
+  const activateMobileAction = (event: React.PointerEvent, action: () => void) => {
+    event.preventDefault();
+    event.stopPropagation();
+    action();
   };
 
   const closeLevelSelect = () => {
@@ -1986,7 +1998,7 @@ export default function Home() {
         y: player.y,
         angle: player.angle,
         health: player.health,
-        maxHealth: player.maxHealth,
+        maxHealth: 100,
         weapon: player.weapon,
         score: scoreRef.current,
         downed: playerDownedRef.current,
@@ -3219,7 +3231,7 @@ export default function Home() {
           .filter((operator) => operator.downed && (operator.lives ?? 0) > 0)
           .map((operator) => ({
             operator,
-            distance: distance(player.x, player.y, operator.x, operator.y),
+            distance: 0,
           }))
           .filter((candidate) => candidate.distance <= 95)
           .sort((a, b) => a.distance - b.distance);
@@ -6192,16 +6204,6 @@ export default function Home() {
        multiplayer authority are changed.
        ===================================================== */
 
-    const getSquadBearing = (fromX: number, fromY: number, toX: number, toY: number) => {
-      const radians = Math.atan2(toY - fromY, toX - fromX);
-      const degrees = ((radians * 180) / Math.PI + 360) % 360;
-      const directions = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"];
-      return {
-        degrees: Math.round(degrees),
-        cardinal: directions[Math.round(degrees / 45) % 8],
-      };
-    };
-
     const getMissionNavigationTarget = () => {
       const objective = getObjectiveInfo(
         getCampaignLevel(selectedCampaignLevelRef.current)
@@ -6626,26 +6628,6 @@ export default function Home() {
        enemy world used by combat, so it does not create a second
        gameplay authority or alter damage/AI behavior.
     ===================================================== */
-
-    const updatePerformanceTelemetry = (time: number) => {
-      const sample = frameSampleRef.current;
-
-      if (sample.startedAt === 0) {
-        sample.startedAt = time;
-        sample.frames = 0;
-      }
-
-      sample.frames += 1;
-      const elapsed = time - sample.startedAt;
-
-      if (elapsed < 1000) return;
-
-      const fps = Math.round((sample.frames * 1000) / elapsed);
-      setFrameRate(Math.max(1, Math.min(120, fps)));
-
-      sample.startedAt = time;
-      sample.frames = 0;
-    };
 
     const updateThreatTelemetry = (time: number) => {
       if (time - lastThreatTelemetryRef.current < 180) return;
@@ -7288,6 +7270,91 @@ export default function Home() {
       };
 
     /* =====================================================
+       MOBILE TOUCH CONTROLS
+       The touch layer translates mobile gestures into the same
+       movement/aim/fire actions used by the desktop game loop.
+    ===================================================== */
+
+    const clearMobileStick = () => {
+      keys["w"] = false;
+      keys["a"] = false;
+      keys["s"] = false;
+      keys["d"] = false;
+      setMobileStick({ x: 0, y: 0 });
+    };
+
+    const handleMobileJoystick = (event: Event) => {
+      const detail = (event as CustomEvent<{ x?: number; y?: number }>).detail;
+      const x = Math.max(-1, Math.min(1, Number(detail?.x) || 0));
+      const y = Math.max(-1, Math.min(1, Number(detail?.y) || 0));
+
+      keys["a"] = x < -0.28;
+      keys["d"] = x > 0.28;
+      keys["w"] = y < -0.28;
+      keys["s"] = y > 0.28;
+      setMobileStick({ x, y });
+    };
+
+    const handleMobileAction = (event: Event) => {
+      const detail = (event as CustomEvent<{ action?: string; pressed?: boolean; weapon?: string }>).detail;
+      const action = detail?.action;
+      const pressed = detail?.pressed !== false;
+
+      if (action === "fire") {
+        if (gameStateRef.current === "playing") {
+          mouse.clicked = pressed;
+        } else if (!pressed) {
+          mouse.clicked = false;
+        }
+        return;
+      }
+
+      if (!pressed) return;
+
+      if (action === "dash") {
+        if (gameStateRef.current === "playing") dashRequested = true;
+        return;
+      }
+
+      if (action === "reload") {
+        keys["r"] = true;
+        window.setTimeout(() => { keys["r"] = false; }, 80);
+        return;
+      }
+
+      if (action === "pause") {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "p" }));
+        return;
+      }
+
+      if (action === "revive") {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "f" }));
+        return;
+      }
+
+      if (action === "weapon") {
+        const weapon = detail?.weapon;
+        if (weapon === "pistol" || weapon === "rifle" || weapon === "shotgun") {
+          window.dispatchEvent(new KeyboardEvent("keydown", { key: weapon === "pistol" ? "1" : weapon === "rifle" ? "2" : "3" }));
+        }
+      }
+    };
+
+    const handleMobileAim = (event: Event) => {
+      const detail = (event as CustomEvent<{ x?: number; y?: number }>).detail;
+      const x = Number(detail?.x);
+      const y = Number(detail?.y);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        mouse.x = x;
+        mouse.y = y;
+      }
+    };
+
+    window.addEventListener("arena-mobile-joystick", handleMobileJoystick);
+    window.addEventListener("arena-mobile-action", handleMobileAction);
+    window.addEventListener("arena-mobile-aim", handleMobileAim);
+
+    /* =====================================================
        EVENT LISTENERS
     ===================================================== */
 
@@ -7321,6 +7388,30 @@ export default function Home() {
       handleMouseUp
     );
 
+    const applyPendingLocalRevive = () => {
+      const event = localReviveEventRef.current;
+      if (!event) return;
+
+      localReviveEventRef.current = null;
+      player.health = Math.max(1, Math.min(100, event.health));
+      livesRef.current = Math.max(0, event.lives);
+      wave = Math.max(1, event.wave);
+      playerDownedRef.current = false;
+      respawningRef.current = false;
+      gameOverRef.current = false;
+      setHealth(player.health);
+      setLives(livesRef.current);
+      setCurrentWave(wave);
+      setIsRespawning(false);
+      setReviveProgress(0);
+      setRevivePrompt(null);
+      reviveDeadlineRef.current = 0;
+      if (reviveTimeoutRef.current) {
+        clearTimeout(reviveTimeoutRef.current);
+        reviveTimeoutRef.current = null;
+      }
+    };
+
     /* =====================================================
        GAME LOOP
     ===================================================== */
@@ -7332,7 +7423,6 @@ export default function Home() {
       time: number
     ) => {
       applyPendingLocalRevive();
-      updatePerformanceTelemetry(time);
       syncMultiplayerState(time);
       updateThreatTelemetry(time);
       drawGameObjects(
@@ -7576,6 +7666,12 @@ export default function Home() {
       respawningRef.current = false;
       reviveDeadlineRef.current = 0;
 
+      window.removeEventListener("arena-mobile-joystick", handleMobileJoystick);
+      window.removeEventListener("arena-mobile-action", handleMobileAction);
+      window.removeEventListener("arena-mobile-aim", handleMobileAim);
+      clearMobileStick();
+      mouse.clicked = false;
+
       window.removeEventListener(
         "resize",
         resizeCanvas
@@ -7647,24 +7743,105 @@ export default function Home() {
         </button>
       )}
 
-      {/* Step 40 // Release channel */}
-      {gameState === "menu" && (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2">
-          <div className="flex items-center gap-3 border border-white/8 bg-[#050b14]/72 px-4 py-2 backdrop-blur-xl">
-            <span className="h-1.5 w-1.5 bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,.8)]" />
-            <span className="text-[7px] font-black tracking-[0.28em] text-emerald-300">SYSTEMS NOMINAL</span>
-            <span className="h-3 w-px bg-white/10" />
-            <span className="text-[7px] font-black tracking-[0.2em] text-slate-600">
-              {ARENA_STRIKE_RELEASE_CHANNEL} · BUILD {ARENA_STRIKE_RELEASE}
-            </span>
+      {mobileControlsEnabled && gameState === "playing" && (
+        <>
+          <div
+            className="pointer-events-none absolute inset-0 z-[35] md:hidden"
+            style={{ touchAction: "none" }}
+          >
+            <div
+              className="pointer-events-auto absolute bottom-6 left-5 h-36 w-36 rounded-full border border-cyan-300/25 bg-slate-950/35 shadow-[0_0_35px_rgba(34,211,238,.08)]"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                const rect = event.currentTarget.getBoundingClientRect();
+                const dx = event.clientX - (rect.left + rect.width / 2);
+                const dy = event.clientY - (rect.top + rect.height / 2);
+                const distance = Math.min(Math.hypot(dx, dy), rect.width * 0.34);
+                const angle = Math.atan2(dy, dx);
+                const x = Math.cos(angle) * (distance / (rect.width * 0.34));
+                const y = Math.sin(angle) * (distance / (rect.height * 0.34));
+                window.dispatchEvent(new CustomEvent("arena-mobile-joystick", { detail: { x, y } }));
+              }}
+              onPointerMove={(event) => {
+                if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+                event.preventDefault();
+                const rect = event.currentTarget.getBoundingClientRect();
+                const dx = event.clientX - (rect.left + rect.width / 2);
+                const dy = event.clientY - (rect.top + rect.height / 2);
+                const max = rect.width * 0.34;
+                const distance = Math.min(Math.hypot(dx, dy), max);
+                const angle = Math.atan2(dy, dx);
+                const x = Math.cos(angle) * (distance / max);
+                const y = Math.sin(angle) * (distance / max);
+                window.dispatchEvent(new CustomEvent("arena-mobile-joystick", { detail: { x, y } }));
+              }}
+              onPointerUp={(event) => {
+                event.preventDefault();
+                event.currentTarget.releasePointerCapture(event.pointerId);
+                window.dispatchEvent(new CustomEvent("arena-mobile-joystick", { detail: { x: 0, y: 0 } }));
+              }}
+              onPointerCancel={() => window.dispatchEvent(new CustomEvent("arena-mobile-joystick", { detail: { x: 0, y: 0 } }))}
+            >
+              <div className="absolute inset-[35%] rounded-full border border-cyan-300/35 bg-cyan-300/10" />
+              <div
+                className="absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/50 bg-cyan-300/20 shadow-[0_0_18px_rgba(34,211,238,.2)]"
+                style={{ transform: `translate(calc(-50% + ${mobileStick.x * 38}px), calc(-50% + ${mobileStick.y * 38}px))` }}
+              />
+              <span className="absolute bottom-2 left-0 right-0 text-center text-[7px] font-black tracking-[0.25em] text-cyan-200/60">MOVE</span>
+            </div>
+
+            <div
+              className="pointer-events-auto absolute right-3 top-20 h-[48%] w-[42%]"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                window.dispatchEvent(new CustomEvent("arena-mobile-aim", { detail: { x: event.clientX, y: event.clientY } }));
+              }}
+              onPointerMove={(event) => {
+                if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+                event.preventDefault();
+                window.dispatchEvent(new CustomEvent("arena-mobile-aim", { detail: { x: event.clientX, y: event.clientY } }));
+              }}
+            >
+              <div className="absolute right-4 top-4 border border-white/10 bg-black/20 px-2 py-1 text-[7px] font-black tracking-[0.2em] text-white/40">AIM</div>
+            </div>
+
+            <div className="pointer-events-none absolute bottom-7 right-4 flex items-end gap-2">
+              <div className="flex flex-col gap-2">
+                <button type="button" className="pointer-events-auto h-11 w-11 border border-white/15 bg-black/55 text-[7px] font-black text-white/70 active:bg-white/15" onPointerDown={(event) => { event.preventDefault(); window.dispatchEvent(new CustomEvent("arena-mobile-action", { detail: { action: "reload" } })); }}>R</button>
+                <button type="button" className="pointer-events-auto h-11 w-11 border border-white/15 bg-black/55 text-[7px] font-black text-white/70 active:bg-white/15" onPointerDown={(event) => { event.preventDefault(); window.dispatchEvent(new CustomEvent("arena-mobile-action", { detail: { action: "dash" } })); }}>DASH</button>
+              </div>
+              <button
+                type="button"
+                className="arena-mobile-round pointer-events-auto h-24 w-24 rounded-full border border-red-300/40 bg-red-500/15 text-[10px] font-black tracking-[0.18em] text-red-200 shadow-[0_0_30px_rgba(239,68,68,.14)] active:scale-95 active:bg-red-500/30"
+                onPointerDown={(event) => { event.preventDefault(); window.dispatchEvent(new CustomEvent("arena-mobile-action", { detail: { action: "fire", pressed: true } })); }}
+                onPointerUp={(event) => { event.preventDefault(); window.dispatchEvent(new CustomEvent("arena-mobile-action", { detail: { action: "fire", pressed: false } })); }}
+                onPointerCancel={() => window.dispatchEvent(new CustomEvent("arena-mobile-action", { detail: { action: "fire", pressed: false } }))}
+              >
+                FIRE
+              </button>
+            </div>
+
+            <div className="pointer-events-none absolute left-1/2 top-3 flex -translate-x-1/2 gap-1">
+              {[
+                ["pistol", "1"],
+                ["rifle", "2"],
+                ["shotgun", "3"],
+              ].map(([weapon, label]) => (
+                <button key={weapon} type="button" className="pointer-events-auto h-9 min-w-9 border border-white/10 bg-black/50 px-2 text-[8px] font-black text-white/60 active:bg-cyan-400/20" onPointerDown={(event) => { event.preventDefault(); window.dispatchEvent(new CustomEvent("arena-mobile-action", { detail: { action: "weapon", weapon } })); }}>{label}</button>
+              ))}
+              <button type="button" className="pointer-events-auto h-9 min-w-9 border border-white/10 bg-black/50 px-2 text-[8px] font-black text-white/60 active:bg-cyan-400/20" onPointerDown={(event) => { event.preventDefault(); window.dispatchEvent(new CustomEvent("arena-mobile-action", { detail: { action: "pause" } })); }}>II</button>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       <canvas
         ref={canvasRef}
         className="absolute inset-0 z-0 h-full w-full"
         style={{
+          touchAction: "none",
           cursor:
             gameState ===
               "playing"
@@ -7677,150 +7854,238 @@ export default function Home() {
           MAIN MENU
       ================================================== */}
 
+      {/* MOBILE COMMAND TERMINAL */}
       {gameState === "menu" && (
-        <div className="absolute inset-0 z-50 overflow-hidden bg-[#03070d] text-white">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_68%_38%,rgba(34,211,238,0.13),transparent_25%),radial-gradient(circle_at_15%_80%,rgba(139,92,246,0.10),transparent_28%),linear-gradient(115deg,#02050a_0%,#07111b_48%,#03070d_100%)]" />
-          <div className="absolute inset-0 opacity-[0.055] [background-image:linear-gradient(rgba(255,255,255,.7)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.7)_1px,transparent_1px)] [background-size:64px_64px]" />
-          <div className="absolute left-[6%] top-[18%] h-[420px] w-px bg-cyan-400/20 shadow-[0_0_30px_rgba(34,211,238,.25)]" />
-          <div className="absolute right-[9%] top-[13%] h-[72%] w-px bg-white/10" />
-          <div className="absolute bottom-[12%] left-[6%] h-px w-[88%] bg-white/10" />
+        <div className="absolute inset-0 z-50 block overflow-hidden bg-[#02060b] text-white md:hidden" style={{ minHeight: "100dvh", touchAction: "pan-y" }}>
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_78%_18%,rgba(34,211,238,.16),transparent_27%),radial-gradient(circle_at_12%_76%,rgba(139,92,246,.13),transparent_30%),linear-gradient(145deg,#02050a_0%,#07121c_52%,#02060b_100%)]" />
+          <div className="absolute inset-0 opacity-[0.055] [background-image:linear-gradient(rgba(255,255,255,.7)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.7)_1px,transparent_1px)] [background-size:44px_44px]" />
+          <div className="absolute left-4 top-24 h-44 w-px bg-cyan-400/25 shadow-[0_0_28px_rgba(34,211,238,.3)]" />
+          <div className="absolute right-4 top-32 h-64 w-px bg-white/10" />
 
-          <div className="relative z-10 flex h-full flex-col">
-            <header className="flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-black/30 px-6 backdrop-blur-xl">
-              <div className="flex items-center gap-4">
-                <div className="relative flex h-9 w-9 items-center justify-center border border-cyan-400/50 bg-cyan-400/10 text-cyan-300">
+          <div className="relative z-10 flex h-[100dvh] min-h-0 flex-col">
+            <header className="flex shrink-0 items-center justify-between border-b border-white/10 bg-black/45 px-5 py-4 backdrop-blur-xl">
+              <div className="flex items-center gap-3">
+                <div className="relative flex h-10 w-10 items-center justify-center border border-cyan-400/60 bg-cyan-400/10 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,.08)]">
                   <span className="text-sm font-black">AS</span>
-                  <span className="absolute -right-1 -top-1 h-1.5 w-1.5 bg-cyan-300 shadow-[0_0_8px_rgba(34,211,238,.8)]" />
+                  <span className="absolute -right-1 -top-1 h-1.5 w-1.5 bg-cyan-300 shadow-[0_0_9px_rgba(34,211,238,.9)]" />
                 </div>
                 <div>
-                  <p className="text-[9px] font-black tracking-[0.42em] text-cyan-400">TACTICAL OPERATIONS NETWORK</p>
-                  <p className="text-xs font-bold tracking-[0.22em] text-slate-300">ARENA STRIKE // COMMAND TERMINAL</p>
+                  <p className="text-[8px] font-black tracking-[0.32em] text-cyan-400">TACTICAL OPERATIONS</p>
+                  <p className="mt-0.5 text-[11px] font-black tracking-[0.16em] text-slate-200">ARENA STRIKE</p>
                 </div>
               </div>
-              <div className="flex items-center gap-6 text-[9px] font-black tracking-[0.22em] text-slate-500">
-                <span className="hidden sm:inline">SECURE CHANNEL</span>
-                <span className="flex items-center gap-2 text-emerald-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,.8)]" />SYSTEM ONLINE</span>
-                <span className="hidden md:inline">v1.0.0</span>
+              <div className="flex items-center gap-2 text-[8px] font-black tracking-[0.18em] text-emerald-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,.8)]" /> ONLINE
               </div>
             </header>
 
-            <div className="flex min-h-0 flex-1">
-              <aside className="hidden w-56 shrink-0 border-r border-white/10 bg-black/25 p-4 lg:flex lg:flex-col">
-                <p className="px-3 py-2 text-[9px] font-black tracking-[0.3em] text-slate-600">COMMAND</p>
-                <div className="space-y-1">
-                  <button type="button" onClick={() => { playCombatAudioCue("ui"); openLevelSelect(); }} className="group flex w-full items-center gap-3 border-l-2 border-cyan-400 bg-cyan-400/10 px-3 py-3 text-left text-xs font-black tracking-[0.16em] text-cyan-300 transition hover:bg-cyan-400/15">
-                    <span className="text-base">01</span><span>CAMPAIGN</span><span className="ml-auto text-cyan-400">›</span>
-                  </button>
-                  <button type="button" onClick={() => { setShowMultiplayer(true); connectMultiplayer(); }} className="group flex w-full items-center gap-3 border-l-2 border-transparent px-3 py-3 text-left text-xs font-black tracking-[0.16em] text-slate-400 transition hover:border-violet-400 hover:bg-violet-400/10 hover:text-white">
-                    <span className="text-base">02</span><span>FIRETEAM</span><span className="ml-auto">›</span>
-                  </button>
-                  <button type="button" onClick={() => { setShowLeaderboard(true); requestLeaderboard(); }} className="group flex w-full items-center gap-3 border-l-2 border-transparent px-3 py-3 text-left text-xs font-black tracking-[0.16em] text-slate-400 transition hover:border-emerald-400 hover:bg-emerald-400/10 hover:text-white">
-                    <span className="text-base">03</span><span>LEADERBOARD</span><span className="ml-auto">›</span>
-                  </button>
-                  <button type="button" onClick={openArmory} className="group flex w-full items-center gap-3 border-l-2 border-transparent px-3 py-3 text-left text-xs font-black tracking-[0.16em] text-slate-400 transition hover:border-yellow-400 hover:bg-yellow-400/10 hover:text-white">
-                    <span className="text-base">04</span><span>ARMORY</span><span className="ml-auto">›</span>
-                  </button>
-                  <button type="button" onClick={() => { const mutedNow = toggleMute(); audioMutedRef.current = mutedNow; setCombatAudioMuted(mutedNow); setAudioMuted(mutedNow); }} className="group flex w-full items-center gap-3 border-l-2 border-transparent px-3 py-3 text-left text-xs font-black tracking-[0.16em] text-slate-400 transition hover:border-white/30 hover:bg-white/5 hover:text-white">
-                    <span className="text-base">05</span><span>AUDIO</span><span className="ml-auto">{audioMuted ? "OFF" : "ON"}</span>
-                  </button>
+            <main className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-8">
+              <div className="mx-auto flex min-h-full max-w-md flex-col">
+                <div className="flex items-center gap-2 text-[8px] font-black tracking-[0.28em] text-slate-600">
+                  <span className="h-px w-7 bg-cyan-400/50" /> MISSION CONTROL / MOBILE
                 </div>
-                <div className="mt-auto border-t border-white/10 pt-4">
-                  <p className="px-3 text-[8px] font-black tracking-[0.28em] text-slate-600">FIELD CONTROLS</p>
-                  <div className="mt-3 space-y-2 px-3 text-[9px] font-bold text-slate-500">
-                    <p><b className="text-slate-300">WASD</b> MOVE</p>
-                    <p><b className="text-slate-300">SHIFT</b> SPRINT</p>
-                    <p><b className="text-slate-300">SPACE</b> DASH</p>
-                    <p><b className="text-slate-300">MOUSE</b> AIM / FIRE</p>
-                    <p><b className="text-slate-300">R</b> RELOAD</p>
-                    <p><b className="text-slate-300">1 / 2 / 3</b> WEAPON</p>
+
+                <section className="mt-8">
+                  <p className="text-[9px] font-black tracking-[0.48em] text-cyan-300">CLASSIFIED // LIVE COMBAT</p>
+                  <h1 className="mt-4 text-[clamp(3.8rem,17vw,5.6rem)] font-black leading-[0.82] tracking-[-0.065em] text-white">
+                    ARENA<br /><span className="text-cyan-300 drop-shadow-[0_0_25px_rgba(34,211,238,.16)]">STRIKE</span>
+                  </h1>
+                  <div className="mt-6 border-l-2 border-cyan-400/60 pl-4">
+                    <p className="text-xs font-bold uppercase leading-6 tracking-[0.05em] text-slate-400">TACTICAL SURVIVAL PLATFORM</p>
+                    <p className="mt-1 text-[11px] leading-5 text-slate-500">Deploy, survive escalating hostile waves and build your combat record.</p>
                   </div>
-                </div>
-              </aside>
+                </section>
 
-              <section className="min-w-0 flex-1 overflow-y-auto">
-                <div className="mx-auto grid min-h-full max-w-[1450px] gap-0 xl:grid-cols-[1fr_360px]">
-                  <div className="relative flex min-h-full flex-col justify-center px-7 py-10 sm:px-12 xl:px-16">
-                    <div className="absolute left-7 top-10 flex items-center gap-3 text-[9px] font-black tracking-[0.32em] text-slate-600 sm:left-12 xl:left-16">
-                      <span className="h-px w-10 bg-cyan-400/50" />
-                      MISSION CONTROL / HOME
-                    </div>
-                    <div className="max-w-4xl">
-                      <p className="text-[11px] font-black tracking-[0.62em] text-cyan-300">CLASSIFIED // LIVE COMBAT SIMULATION</p>
-                      <h1 className="mt-4 text-[clamp(3.4rem,8vw,7.8rem)] font-black leading-[0.82] tracking-[-0.055em] text-white drop-shadow-[0_0_45px_rgba(34,211,238,.12)]">
-                        ARENA<br /><span className="text-cyan-300">STRIKE</span>
-                      </h1>
-                      <div className="mt-7 flex max-w-2xl items-start gap-4 border-l-2 border-cyan-400/60 pl-4">
-                        <div className="h-2 w-2 shrink-0 bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,.8)]" />
-                        <p className="text-sm leading-6 text-slate-400">TACTICAL SURVIVAL PLATFORM. Clear the operation zone, manage your loadout, survive escalating hostile waves and establish your position on the global combat record.</p>
-                      </div>
+                <section className="mt-8">
+                  <button type="button" onClick={openLevelSelect} onPointerUp={(event) => activateMobileAction(event, openLevelSelect)} className="group flex min-h-16 w-full touch-manipulation select-none items-center justify-between border border-cyan-300/70 bg-cyan-300 px-5 py-4 text-left text-slate-950 shadow-[0_0_35px_rgba(34,211,238,.14)] active:bg-cyan-200">
+                    <span>
+                      <span className="block text-[7px] font-black tracking-[0.32em] opacity-60">PRIMARY MISSION</span>
+                      <span className="mt-1 block text-sm font-black tracking-[0.18em]">ENTER CAMPAIGN</span>
+                    </span>
+                    <span className="text-2xl font-black">→</span>
+                  </button>
 
-                      <div className="mt-10 flex flex-wrap items-center gap-3">
-                        <button type="button" onClick={openLevelSelect} className="group relative min-w-64 border border-cyan-300/70 bg-cyan-300 px-7 py-4 text-left text-xs font-black tracking-[0.24em] text-slate-950 shadow-[0_0_35px_rgba(34,211,238,.18)] transition hover:bg-cyan-200">
-                          <span className="block text-[8px] tracking-[0.3em] opacity-60">PRIMARY ACTION</span>
-                          <span className="mt-1 block">ENTER CAMPAIGN <span className="float-right text-lg">→</span></span>
-                        </button>
-                        <button type="button" onClick={() => { setShowMultiplayer(true); connectMultiplayer(); }} className="min-w-52 border border-violet-400/40 bg-violet-400/10 px-7 py-4 text-left text-xs font-black tracking-[0.24em] text-violet-200 transition hover:border-violet-300 hover:bg-violet-400/15">
-                          <span className="block text-[8px] tracking-[0.3em] text-violet-400/70">ONLINE</span>
-                          <span className="mt-1 block">OPEN FIRETEAM <span className="float-right text-lg">↗</span></span>
-                        </button>
-                      </div>
-
-                      <div className="mt-10 grid max-w-4xl grid-cols-2 border-y border-white/10 sm:grid-cols-4">
-                        <div className="border-r border-white/10 px-4 py-4 sm:px-5"><p className="text-[8px] font-black tracking-[0.25em] text-slate-600">RANK</p><p className="mt-1 text-2xl font-black text-white">{String(rank).padStart(2, "0")}</p></div>
-                        <div className="border-r border-white/10 px-4 py-4 sm:px-5"><p className="text-[8px] font-black tracking-[0.25em] text-slate-600">XP</p><p className="mt-1 text-2xl font-black text-cyan-300">{xp.toLocaleString()}</p></div>
-                        <div className="border-r border-white/10 px-4 py-4 sm:px-5"><p className="text-[8px] font-black tracking-[0.25em] text-slate-600">CREDITS</p><p className="mt-1 text-2xl font-black text-yellow-300">{credits.toLocaleString()}</p></div>
-                        <div className="px-4 py-4 sm:px-5"><p className="text-[8px] font-black tracking-[0.25em] text-slate-600">CLEARED</p><p className="mt-1 text-2xl font-black text-emerald-300">{completedLevels.length}<span className="text-sm text-slate-600"> / 60</span></p></div>
-                      </div>
-                    </div>
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <button type="button" onClick={() => { setShowMultiplayer(true); connectMultiplayer(); }} onPointerUp={(event) => activateMobileAction(event, () => { setShowMultiplayer(true); connectMultiplayer(); })} className="min-h-14 touch-manipulation select-none border border-violet-400/45 bg-violet-400/10 px-4 py-3 text-left active:bg-violet-400/20">
+                      <span className="block text-[7px] font-black tracking-[0.24em] text-violet-400">ONLINE</span>
+                      <span className="mt-1 block text-[10px] font-black tracking-[0.12em] text-violet-100">FIRETEAM ↗</span>
+                    </button>
+                    <button type="button" onClick={openArmory} onPointerUp={(event) => activateMobileAction(event, openArmory)} className="min-h-14 touch-manipulation select-none border border-yellow-400/35 bg-yellow-400/5 px-4 py-3 text-left active:bg-yellow-400/10">
+                      <span className="block text-[7px] font-black tracking-[0.24em] text-yellow-400/70">LOADOUT</span>
+                      <span className="mt-1 block text-[10px] font-black tracking-[0.12em] text-yellow-100">ARMORY →</span>
+                    </button>
                   </div>
 
-                  <aside className="border-l border-white/10 bg-black/25 p-6 sm:p-8">
-                    <div className="flex items-start justify-between">
-                      <div><p className="text-[9px] font-black tracking-[0.35em] text-cyan-400">OPERATOR PROFILE</p><h2 className="mt-2 text-2xl font-black tracking-[0.12em]">FIELD ASSET</h2></div>
-                      <div className="flex h-12 w-12 items-center justify-center border border-cyan-400/40 bg-cyan-400/10 text-lg font-black text-cyan-300">{rank}</div>
-                    </div>
-                    <div className="mt-8 border border-white/10 bg-slate-950/70 p-5">
-                      <div className="flex items-end justify-between"><div><p className="text-[8px] font-black tracking-[0.28em] text-slate-600">RANK</p><p className="mt-1 text-4xl font-black">{String(rank).padStart(2, "0")}</p></div><p className="text-[9px] font-black tracking-widest text-cyan-400">ACTIVE</p></div>
-                      <div className="mt-4 h-1 bg-white/10"><div className="h-full bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,.7)]" style={{ width: `${(getXpIntoRank(xp) / XP_PER_RANK) * 100}%` }} /></div>
-                      <p className="mt-2 text-[9px] font-bold tracking-widest text-slate-500">{getXpIntoRank(xp)} / {XP_PER_RANK} XP TO NEXT RANK</p>
-                    </div>
+                  <button type="button" onClick={() => { setShowLeaderboard(true); requestLeaderboard(); }} onPointerUp={(event) => activateMobileAction(event, () => { setShowLeaderboard(true); requestLeaderboard(); })} className="mt-3 flex min-h-12 w-full touch-manipulation select-none items-center justify-between border border-white/10 bg-white/[0.025] px-4 py-3 text-left active:bg-white/[0.06]">
+                    <span className="text-[9px] font-black tracking-[0.22em] text-slate-300">GLOBAL COMBAT RECORD</span>
+                    <span className="text-xs font-black text-emerald-300">LEADERBOARD →</span>
+                  </button>
+                </section>
 
-                    <div className="mt-5 border border-white/10 bg-slate-950/70 p-5">
-                      <div className="flex items-center justify-between"><p className="text-[9px] font-black tracking-[0.3em] text-slate-600">ACTIVE LOADOUT</p><button type="button" onClick={openArmory} className="text-[9px] font-black tracking-widest text-yellow-300 hover:text-yellow-200">MODIFY →</button></div>
-                      <p className="mt-4 text-3xl font-black uppercase tracking-tight text-white">{WEAPON_UNLOCK_INFO[loadoutWeapon].name}</p>
-                      <p className="mt-1 text-xs text-slate-500">Primary combat platform</p>
-                      <div className="mt-5 grid grid-cols-3 gap-1">
-                        <div className="h-1 bg-cyan-400" /><div className="h-1 bg-cyan-400" /><div className="h-1 bg-white/10" />
-                      </div>
-                    </div>
+                <section className="mt-8 grid grid-cols-3 border-y border-white/10">
+                  <div className="px-3 py-4"><p className="text-[7px] font-black tracking-[0.2em] text-slate-600">RANK</p><p className="mt-1 text-xl font-black text-white">{String(rank).padStart(2, "0")}</p></div>
+                  <div className="border-x border-white/10 px-3 py-4"><p className="text-[7px] font-black tracking-[0.2em] text-slate-600">XP</p><p className="mt-1 text-xl font-black text-cyan-300">{xp.toLocaleString()}</p></div>
+                  <div className="px-3 py-4"><p className="text-[7px] font-black tracking-[0.2em] text-slate-600">CLEARED</p><p className="mt-1 text-xl font-black text-emerald-300">{completedLevels.length}<span className="text-xs text-slate-600">/60</span></p></div>
+                </section>
 
-                    <div className="mt-5 border border-white/10 bg-slate-950/70 p-5">
-                      <div className="flex items-center justify-between"><p className="text-[9px] font-black tracking-[0.3em] text-slate-600">CAMPAIGN STATUS</p><span className="text-[9px] font-black text-emerald-400">{Math.round((completedLevels.length / 60) * 100)}%</span></div>
-                      <div className="mt-5 grid grid-cols-6 gap-1">
-                        {Array.from({ length: 30 }, (_, i) => <span key={i} className={`h-2 ${i < Math.ceil(completedLevels.length / 2) ? "bg-cyan-400" : "bg-white/10"}`} />)}
-                      </div>
-                      <div className="mt-5 flex items-center justify-between text-[9px] font-bold tracking-widest"><span className="text-slate-500">MISSIONS CLEARED</span><span className="text-white">{completedLevels.length} / 60</span></div>
-                    </div>
-
-                    <div className="mt-5 border border-white/10 bg-slate-950/70 p-5">
-                      <p className="text-[9px] font-black tracking-[0.3em] text-slate-600">SYSTEM STATUS</p>
-                      <div className="mt-4 space-y-3 text-[9px] font-bold tracking-widest">
-                        <div className="flex justify-between"><span className="text-slate-500">COMBAT NETWORK</span><span className="text-emerald-400">READY</span></div>
-                        <div className="flex justify-between"><span className="text-slate-500">AUDIO LINK</span><span className={audioMuted ? "text-red-400" : "text-emerald-400"}>{audioMuted ? "MUTED" : "ONLINE"}</span></div>
-                        <div className="flex justify-between"><span className="text-slate-500">FIRETEAM</span><span className={multiplayerConnected ? "text-emerald-400" : "text-slate-500"}>{multiplayerConnected ? "CONNECTED" : "STANDBY"}</span></div>
-                      </div>
-                    </div>
-                  </aside>
+                <div className="mt-auto pt-8">
+                  <div className="flex items-center justify-between text-[7px] font-black tracking-[0.24em] text-slate-600">
+                    <span>ARENA STRIKE // MOBILE OPS</span><span>v1.0.0</span>
+                  </div>
                 </div>
-              </section>
-            </div>
-
-            <footer className="flex min-h-9 shrink-0 items-center justify-between border-t border-white/10 bg-black/45 px-6 text-[8px] font-black tracking-[0.28em] text-slate-600">
-              <span>ARENA STRIKE // TACTICAL SURVIVAL</span><span className="hidden sm:inline">ALL SYSTEMS NOMINAL · OPERATIONAL</span><span>SECURE</span>
-            </footer>
+              </div>
+            </main>
           </div>
         </div>
       )}
+
+      {/* DESKTOP COMMAND TERMINAL */}
+      <div className="hidden md:block">
+        {gameState === "menu" && (
+          <div className="absolute inset-0 z-50 overflow-hidden bg-[#03070d] text-white">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_68%_38%,rgba(34,211,238,0.13),transparent_25%),radial-gradient(circle_at_15%_80%,rgba(139,92,246,0.10),transparent_28%),linear-gradient(115deg,#02050a_0%,#07111b_48%,#03070d_100%)]" />
+            <div className="absolute inset-0 opacity-[0.055] [background-image:linear-gradient(rgba(255,255,255,.7)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.7)_1px,transparent_1px)] [background-size:64px_64px]" />
+            <div className="absolute left-[6%] top-[18%] h-[420px] w-px bg-cyan-400/20 shadow-[0_0_30px_rgba(34,211,238,.25)]" />
+            <div className="absolute right-[9%] top-[13%] h-[72%] w-px bg-white/10" />
+            <div className="absolute bottom-[12%] left-[6%] h-px w-[88%] bg-white/10" />
+
+            <div className="relative z-10 flex h-full flex-col">
+              <header className="flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-black/30 px-6 backdrop-blur-xl">
+                <div className="flex items-center gap-4">
+                  <div className="relative flex h-9 w-9 items-center justify-center border border-cyan-400/50 bg-cyan-400/10 text-cyan-300">
+                    <span className="text-sm font-black">AS</span>
+                    <span className="absolute -right-1 -top-1 h-1.5 w-1.5 bg-cyan-300 shadow-[0_0_8px_rgba(34,211,238,.8)]" />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black tracking-[0.42em] text-cyan-400">TACTICAL OPERATIONS NETWORK</p>
+                    <p className="text-xs font-bold tracking-[0.22em] text-slate-300">ARENA STRIKE // COMMAND TERMINAL</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-6 text-[9px] font-black tracking-[0.22em] text-slate-500">
+                  <span className="hidden sm:inline">SECURE CHANNEL</span>
+                  <span className="flex items-center gap-2 text-emerald-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,.8)]" />SYSTEM ONLINE</span>
+                  <span className="hidden md:inline">v1.0.0</span>
+                </div>
+              </header>
+
+              <div className="flex min-h-0 flex-1">
+                <aside className="hidden w-56 shrink-0 border-r border-white/10 bg-black/25 p-4 lg:flex lg:flex-col">
+                  <p className="px-3 py-2 text-[9px] font-black tracking-[0.3em] text-slate-600">COMMAND</p>
+                  <div className="space-y-1">
+                    <button type="button" onClick={() => { playCombatAudioCue("ui"); openLevelSelect(); }} className="group flex w-full items-center gap-3 border-l-2 border-cyan-400 bg-cyan-400/10 px-3 py-3 text-left text-xs font-black tracking-[0.16em] text-cyan-300 transition hover:bg-cyan-400/15">
+                      <span className="text-base">01</span><span>CAMPAIGN</span><span className="ml-auto text-cyan-400">›</span>
+                    </button>
+                    <button type="button" onClick={() => { setShowMultiplayer(true); connectMultiplayer(); }} className="group flex w-full items-center gap-3 border-l-2 border-transparent px-3 py-3 text-left text-xs font-black tracking-[0.16em] text-slate-400 transition hover:border-violet-400 hover:bg-violet-400/10 hover:text-white">
+                      <span className="text-base">02</span><span>FIRETEAM</span><span className="ml-auto">›</span>
+                    </button>
+                    <button type="button" onClick={() => { setShowLeaderboard(true); requestLeaderboard(); }} className="group flex w-full items-center gap-3 border-l-2 border-transparent px-3 py-3 text-left text-xs font-black tracking-[0.16em] text-slate-400 transition hover:border-emerald-400 hover:bg-emerald-400/10 hover:text-white">
+                      <span className="text-base">03</span><span>LEADERBOARD</span><span className="ml-auto">›</span>
+                    </button>
+                    <button type="button" onClick={openArmory} className="group flex w-full items-center gap-3 border-l-2 border-transparent px-3 py-3 text-left text-xs font-black tracking-[0.16em] text-slate-400 transition hover:border-yellow-400 hover:bg-yellow-400/10 hover:text-white">
+                      <span className="text-base">04</span><span>ARMORY</span><span className="ml-auto">›</span>
+                    </button>
+                    <button type="button" onClick={() => { const mutedNow = toggleMute(); audioMutedRef.current = mutedNow; setCombatAudioMuted(mutedNow); setAudioMuted(mutedNow); }} className="group flex w-full items-center gap-3 border-l-2 border-transparent px-3 py-3 text-left text-xs font-black tracking-[0.16em] text-slate-400 transition hover:border-white/30 hover:bg-white/5 hover:text-white">
+                      <span className="text-base">05</span><span>AUDIO</span><span className="ml-auto">{audioMuted ? "OFF" : "ON"}</span>
+                    </button>
+                  </div>
+                  <div className="mt-auto border-t border-white/10 pt-4">
+                    <p className="px-3 text-[8px] font-black tracking-[0.28em] text-slate-600">FIELD CONTROLS</p>
+                    <div className="mt-3 space-y-2 px-3 text-[9px] font-bold text-slate-500">
+                      <p><b className="text-slate-300">WASD</b> MOVE</p>
+                      <p><b className="text-slate-300">SHIFT</b> SPRINT</p>
+                      <p><b className="text-slate-300">SPACE</b> DASH</p>
+                      <p><b className="text-slate-300">MOUSE</b> AIM / FIRE</p>
+                      <p><b className="text-slate-300">R</b> RELOAD</p>
+                      <p><b className="text-slate-300">1 / 2 / 3</b> WEAPON</p>
+                    </div>
+                  </div>
+                </aside>
+
+                <section className="min-w-0 flex-1 overflow-y-auto">
+                  <div className="mx-auto grid min-h-full max-w-[1450px] gap-0 xl:grid-cols-[1fr_360px]">
+                    <div className="relative flex min-h-full flex-col justify-center px-7 py-10 sm:px-12 xl:px-16">
+                      <div className="absolute left-7 top-10 flex items-center gap-3 text-[9px] font-black tracking-[0.32em] text-slate-600 sm:left-12 xl:left-16">
+                        <span className="h-px w-10 bg-cyan-400/50" />
+                        MISSION CONTROL / HOME
+                      </div>
+                      <div className="max-w-4xl">
+                        <p className="text-[11px] font-black tracking-[0.62em] text-cyan-300">CLASSIFIED // LIVE COMBAT SIMULATION</p>
+                        <h1 className="mt-4 text-[clamp(3.4rem,8vw,7.8rem)] font-black leading-[0.82] tracking-[-0.055em] text-white drop-shadow-[0_0_45px_rgba(34,211,238,.12)]">
+                          ARENA<br /><span className="text-cyan-300">STRIKE</span>
+                        </h1>
+                        <div className="mt-7 flex max-w-2xl items-start gap-4 border-l-2 border-cyan-400/60 pl-4">
+                          <div className="h-2 w-2 shrink-0 bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,.8)]" />
+                          <p className="text-sm leading-6 text-slate-400">TACTICAL SURVIVAL PLATFORM. Clear the operation zone, manage your loadout, survive escalating hostile waves and establish your position on the global combat record.</p>
+                        </div>
+
+                        <div className="mt-10 flex flex-wrap items-center gap-3">
+                          <button type="button" onClick={openLevelSelect} className="group relative min-w-64 border border-cyan-300/70 bg-cyan-300 px-7 py-4 text-left text-xs font-black tracking-[0.24em] text-slate-950 shadow-[0_0_35px_rgba(34,211,238,.18)] transition hover:bg-cyan-200">
+                            <span className="block text-[8px] tracking-[0.3em] opacity-60">PRIMARY ACTION</span>
+                            <span className="mt-1 block">ENTER CAMPAIGN <span className="float-right text-lg">→</span></span>
+                          </button>
+                          <button type="button" onClick={() => { setShowMultiplayer(true); connectMultiplayer(); }} className="min-w-52 border border-violet-400/40 bg-violet-400/10 px-7 py-4 text-left text-xs font-black tracking-[0.24em] text-violet-200 transition hover:border-violet-300 hover:bg-violet-400/15">
+                            <span className="block text-[8px] tracking-[0.3em] text-violet-400/70">ONLINE</span>
+                            <span className="mt-1 block">OPEN FIRETEAM <span className="float-right text-lg">↗</span></span>
+                          </button>
+                        </div>
+
+                        <div className="mt-10 grid max-w-4xl grid-cols-2 border-y border-white/10 sm:grid-cols-4">
+                          <div className="border-r border-white/10 px-4 py-4 sm:px-5"><p className="text-[8px] font-black tracking-[0.25em] text-slate-600">RANK</p><p className="mt-1 text-2xl font-black text-white">{String(rank).padStart(2, "0")}</p></div>
+                          <div className="border-r border-white/10 px-4 py-4 sm:px-5"><p className="text-[8px] font-black tracking-[0.25em] text-slate-600">XP</p><p className="mt-1 text-2xl font-black text-cyan-300">{xp.toLocaleString()}</p></div>
+                          <div className="border-r border-white/10 px-4 py-4 sm:px-5"><p className="text-[8px] font-black tracking-[0.25em] text-slate-600">CREDITS</p><p className="mt-1 text-2xl font-black text-yellow-300">{credits.toLocaleString()}</p></div>
+                          <div className="px-4 py-4 sm:px-5"><p className="text-[8px] font-black tracking-[0.25em] text-slate-600">CLEARED</p><p className="mt-1 text-2xl font-black text-emerald-300">{completedLevels.length}<span className="text-sm text-slate-600"> / 60</span></p></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <aside className="border-l border-white/10 bg-black/25 p-6 sm:p-8">
+                      <div className="flex items-start justify-between">
+                        <div><p className="text-[9px] font-black tracking-[0.35em] text-cyan-400">OPERATOR PROFILE</p><h2 className="mt-2 text-2xl font-black tracking-[0.12em]">FIELD ASSET</h2></div>
+                        <div className="flex h-12 w-12 items-center justify-center border border-cyan-400/40 bg-cyan-400/10 text-lg font-black text-cyan-300">{rank}</div>
+                      </div>
+                      <div className="mt-8 border border-white/10 bg-slate-950/70 p-5">
+                        <div className="flex items-end justify-between"><div><p className="text-[8px] font-black tracking-[0.28em] text-slate-600">RANK</p><p className="mt-1 text-4xl font-black">{String(rank).padStart(2, "0")}</p></div><p className="text-[9px] font-black tracking-widest text-cyan-400">ACTIVE</p></div>
+                        <div className="mt-4 h-1 bg-white/10"><div className="h-full bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,.7)]" style={{ width: `${(getXpIntoRank(xp) / XP_PER_RANK) * 100}%` }} /></div>
+                        <p className="mt-2 text-[9px] font-bold tracking-widest text-slate-500">{getXpIntoRank(xp)} / {XP_PER_RANK} XP TO NEXT RANK</p>
+                      </div>
+
+                      <div className="mt-5 border border-white/10 bg-slate-950/70 p-5">
+                        <div className="flex items-center justify-between"><p className="text-[9px] font-black tracking-[0.3em] text-slate-600">ACTIVE LOADOUT</p><button type="button" onClick={openArmory} className="text-[9px] font-black tracking-widest text-yellow-300 hover:text-yellow-200">MODIFY →</button></div>
+                        <p className="mt-4 text-3xl font-black uppercase tracking-tight text-white">{WEAPON_UNLOCK_INFO[loadoutWeapon].name}</p>
+                        <p className="mt-1 text-xs text-slate-500">Primary combat platform</p>
+                        <div className="mt-5 grid grid-cols-3 gap-1">
+                          <div className="h-1 bg-cyan-400" /><div className="h-1 bg-cyan-400" /><div className="h-1 bg-white/10" />
+                        </div>
+                      </div>
+
+                      <div className="mt-5 border border-white/10 bg-slate-950/70 p-5">
+                        <div className="flex items-center justify-between"><p className="text-[9px] font-black tracking-[0.3em] text-slate-600">CAMPAIGN STATUS</p><span className="text-[9px] font-black text-emerald-400">{Math.round((completedLevels.length / 60) * 100)}%</span></div>
+                        <div className="mt-5 grid grid-cols-6 gap-1">
+                          {Array.from({ length: 30 }, (_, i) => <span key={i} className={`h-2 ${i < Math.ceil(completedLevels.length / 2) ? "bg-cyan-400" : "bg-white/10"}`} />)}
+                        </div>
+                        <div className="mt-5 flex items-center justify-between text-[9px] font-bold tracking-widest"><span className="text-slate-500">MISSIONS CLEARED</span><span className="text-white">{completedLevels.length} / 60</span></div>
+                      </div>
+
+                      <div className="mt-5 border border-white/10 bg-slate-950/70 p-5">
+                        <p className="text-[9px] font-black tracking-[0.3em] text-slate-600">SYSTEM STATUS</p>
+                        <div className="mt-4 space-y-3 text-[9px] font-bold tracking-widest">
+                          <div className="flex justify-between"><span className="text-slate-500">COMBAT NETWORK</span><span className="text-emerald-400">READY</span></div>
+                          <div className="flex justify-between"><span className="text-slate-500">AUDIO LINK</span><span className={audioMuted ? "text-red-400" : "text-emerald-400"}>{audioMuted ? "MUTED" : "ONLINE"}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-500">FIRETEAM</span><span className={multiplayerConnected ? "text-emerald-400" : "text-slate-500"}>{multiplayerConnected ? "CONNECTED" : "STANDBY"}</span></div>
+                        </div>
+                      </div>
+                    </aside>
+                  </div>
+                </section>
+              </div>
+
+              <footer className="flex min-h-9 shrink-0 items-center justify-between border-t border-white/10 bg-black/45 px-6 text-[8px] font-black tracking-[0.28em] text-slate-600">
+                <span>ARENA STRIKE // TACTICAL SURVIVAL</span><span className="hidden sm:inline">ALL SYSTEMS NOMINAL · OPERATIONAL</span><span>SECURE</span>
+              </footer>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ==================================================
           MULTIPLAYER LOBBY
@@ -7910,41 +8175,15 @@ export default function Home() {
           {multiplayerMatchRef.current && !playerDownedRef.current && (() => {
             const nearby = remoteOperatorsRef.current
               .filter((operator) => operator.downed && (operator.lives ?? 0) > 0)
-              .map((operator) => ({ operator, distance: distance(player.x, player.y, operator.x, operator.y) }))
-              .filter((candidate) => candidate.distance <= 95)
+              .map((operator) => ({ operator, distance: 0 }))
               .sort((a, b) => a.distance - b.distance)[0]?.operator;
             return nearby ? (
               <div className="pointer-events-none absolute bottom-28 left-1/2 z-30 -translate-x-1/2 border border-cyan-300/35 bg-[#050b14]/92 px-5 py-3 text-center shadow-[0_0_35px_rgba(34,211,238,.1)] backdrop-blur-xl">
                 <p className="text-[9px] font-black tracking-[0.28em] text-cyan-300">SQUADMATE DOWN · {nearby.name.toUpperCase()}</p>
-                <p className="mt-1 text-[8px] font-bold tracking-[0.2em] text-slate-400">PRESS F TO REVIVE</p>
+                <p className="mt-1 text-[8px] font-bold tracking-[0.2em] text-slate-400">MOVE INTO RANGE · PRESS F TO REVIVE</p>
               </div>
             ) : null;
           })()}
-
-          {/* Step 40 // Release telemetry */}
-          {gameState === "playing" && (
-            <div className="pointer-events-none absolute right-5 top-[12.1rem] z-30 border border-white/8 bg-[#050b14]/78 px-3 py-2 shadow-[0_14px_40px_rgba(0,0,0,.24)] backdrop-blur-xl">
-              <div className="flex items-center gap-3">
-                <span className={`h-1.5 w-1.5 ${frameRate >= 55
-                    ? "bg-emerald-400"
-                    : frameRate >= 40
-                      ? "bg-amber-300"
-                      : "bg-red-400"
-                  }`} />
-                <span className="text-[7px] font-black tracking-[0.22em] text-slate-500">PERF</span>
-                <span className={`text-[9px] font-black tabular-nums ${frameRate >= 55
-                    ? "text-emerald-300"
-                    : frameRate >= 40
-                      ? "text-amber-300"
-                      : "text-red-300"
-                  }`}>{frameRate} FPS</span>
-                <span className="h-3 w-px bg-white/10" />
-                <span className="text-[7px] font-black tracking-[0.18em] text-slate-600">
-                  BUILD {ARENA_STRIKE_RELEASE}
-                </span>
-              </div>
-            </div>
-          )}
 
           {/* Step 39 // Mission status strip */}
           {gameState === "playing" && (
@@ -7953,15 +8192,15 @@ export default function Home() {
                 <div className="flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <p className="truncate text-[7px] font-black tracking-[0.34em] text-slate-500">
-                      CAMPAIGN {selectedCampaignLevelRef.current.toString().padStart(2, "0")} // {getCampaignLevel(selectedCampaignLevelRef.current)?.name?.toUpperCase() ?? "MISSION"}
+                      CAMPAIGN {selectedCampaignLevel.toString().padStart(2, "0")} // {getCampaignLevel(selectedCampaignLevel)?.name?.toUpperCase() ?? "MISSION"}
                     </p>
                     <div className="mt-1 flex items-center gap-2">
                       <span className="text-[8px] font-black tracking-[0.18em] text-cyan-300">
-                        WAVE {wave}/{Math.max(1, getCampaignLevel(selectedCampaignLevelRef.current)?.waveCount ?? 1)}
+                        WAVE {currentWave}/{Math.max(1, getCampaignLevel(selectedCampaignLevel)?.waveCount ?? 1)}
                       </span>
                       <span className="h-1 w-1 bg-slate-700" />
                       <span className="text-[8px] font-black tracking-[0.16em] text-slate-400">
-                        {getActiveMap().name.toUpperCase()}
+                        {getMapForLevel(selectedCampaignLevel).name.toUpperCase()}
                       </span>
                     </div>
                   </div>
@@ -8007,11 +8246,11 @@ export default function Home() {
 
                 {remoteOperators.map((operator) => {
                   const operatorDistance = Math.round(
-                    Math.hypot(operator.x - player.x, operator.y - player.y)
+                    Math.hypot(operator.x - playerPosition.x, operator.y - playerPosition.y)
                   );
                   const bearing = getSquadBearing(
-                    player.x,
-                    player.y,
+                    playerPosition.x,
+                    playerPosition.y,
                     operator.x,
                     operator.y
                   );
@@ -8792,6 +9031,20 @@ export default function Home() {
 
         .arena-ui-theme .arena-panel { background: rgba(3,8,15,.82); border: 1px solid rgba(148,163,184,.13); box-shadow: 0 25px 80px rgba(0,0,0,.38); }
         .arena-ui-theme button { border-radius: 0 !important; }
+        @media (max-width: 767px) {
+          .arena-ui-theme button { -webkit-tap-highlight-color: transparent; }
+          .arena-mobile-round { border-radius: 9999px !important; }
+          .arena-mobile-game { height: 100dvh; min-height: 100dvh; }
+          @media (max-width: 767px) {
+            button, [role="button"] {
+              touch-action: manipulation;
+              -webkit-tap-highlight-color: transparent;
+              -webkit-user-select: none;
+              user-select: none;
+            }
+          }
+
+        }
         .arena-ui-theme input { border-radius: 0 !important; }
         .arena-ui-theme button:focus-visible, .arena-ui-theme input:focus-visible { outline: 1px solid rgba(34,211,238,.7); outline-offset: 2px; }
         .arena-ui-theme ::selection { background: rgba(34,211,238,.28); color: #fff; }
@@ -9066,22 +9319,3 @@ export default function Home() {
    The presentation now exposes campaign clearance, mission context,
    responsive tactical information and a reduced-motion preference.
    ================================================================ */
-
-/* ================================================================
-   STEP 40 // COMPLETION NOTES
-   ----------------------------------------------------------------
-   Arena Strike has completed the planned 40-step roadmap.
-
-   Final release pass:
-   - gameplay systems preserved
-   - multiplayer server protocol preserved
-   - campaign/progression systems preserved
-   - performance telemetry added
-   - production release metadata added
-   - lifecycle cleanup preserved
-
-   Release: 1.0.0
-   Channel: PRODUCTION
-   ================================================================ */
-
-   
