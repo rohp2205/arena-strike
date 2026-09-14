@@ -1,36 +1,196 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎮 Arena Strike
 
-## Getting Started
+> A professional 2D top-down tactical multiplayer shooter built with
+> Next.js, TypeScript, and Socket.IO.
 
-First, run the development server:
+## 🚀 Play Arena Strike
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+**[▶ Play the Game](https://arena-strike.pages.dev)**
+
+Arena Strike is a browser-based tactical shooter designed for desktop
+gameplay, with real-time multiplayer support.
+
+## ✨ Features
+
+-   🎯 2D top-down tactical shooter gameplay
+-   👥 Real-time multiplayer using Socket.IO
+-   🕹️ Desktop-focused controls and gameplay
+-   🌐 Online deployment with Cloudflare Pages
+-   ⚡ Dedicated multiplayer server
+-   📱 Progressive Web App (PWA) support
+-   🔄 Automatic deployment from GitHub
+-   🏠 Room-based multiplayer support
+-   ❤️ Health and combat systems
+-   🏆 Multiplayer game flow and player interaction
+
+## 🎮 Controls
+
+  Action          Control
+  --------------- -----------------------------
+  Move            `W` `A` `S` `D`
+  Aim             Mouse
+  Shoot           Left Mouse Button
+  Other actions   Follow the in-game controls
+
+> Controls may vary depending on the current game mode and
+> implementation.
+
+## 🌐 Live Services
+
+### 🎮 Game
+
+**https://arena-strike.pages.dev**
+
+### ⚡ Multiplayer Server
+
+**https://arena-strike-server.onrender.com**
+
+The frontend is hosted on Cloudflare Pages, while the real-time
+Socket.IO multiplayer server runs separately on Render.
+
+## 🛠️ Tech Stack
+
+-   **Next.js**
+-   **React**
+-   **TypeScript**
+-   **JavaScript**
+-   **Socket.IO**
+-   **Node.js**
+-   **PWA**
+-   **Cloudflare Pages**
+-   **Render**
+-   **GitHub**
+
+## 📁 Project Structure
+
+``` text
+arena-strike/
+├── public/                  # Static assets and PWA files
+├── src/                     # Next.js application source
+├── multiplayer-server.js    # Socket.IO multiplayer server
+├── capacitor.config.ts      # Capacitor configuration
+├── next.config.ts           # Next.js configuration
+├── package.json             # Project dependencies and scripts
+└── README.md                # Project documentation
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 💻 Run Locally
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Clone the repository:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+``` bash
+git clone https://github.com/rohp2205/arena-strike.git
+cd arena-strike
+```
 
-## Learn More
+Install dependencies:
 
-To learn more about Next.js, take a look at the following resources:
+``` bash
+npm install
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Start the frontend
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+``` bash
+npm run dev
+```
 
-## Deploy on Vercel
+The development site will normally be available at:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+``` text
+http://localhost:3000
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Start the multiplayer server
+
+In another terminal:
+
+``` bash
+node multiplayer-server.js
+```
+
+The local multiplayer server runs on the configured local port.
+
+## 🏗️ Production Build
+
+Create the production static export:
+
+``` bash
+npm run build
+```
+
+The production files are generated in:
+
+``` text
+out/
+```
+
+## 🌍 Deployment
+
+Arena Strike uses a split deployment architecture:
+
+``` text
+                    ┌──────────────────────┐
+                    │   GitHub Repository   │
+                    │     arena-strike      │
+                    └──────────┬───────────┘
+                               │
+                 ┌─────────────┴─────────────┐
+                 │                           │
+                 ▼                           ▼
+       ┌──────────────────┐        ┌──────────────────┐
+       │ Cloudflare Pages │        │      Render      │
+       │    Frontend      │        │ Multiplayer API  │
+       └────────┬─────────┘        └────────┬─────────┘
+                │                           │
+                ▼                           ▼
+       arena-strike.pages.dev     arena-strike-server
+                                      .onrender.com
+```
+
+The frontend connects to the multiplayer server through:
+
+``` text
+NEXT_PUBLIC_SOCKET_URL
+```
+
+## 🔐 Environment Variables
+
+For production, configure:
+
+``` text
+NEXT_PUBLIC_SOCKET_URL=https://arena-strike-server.onrender.com
+```
+
+For local development, the application can use its local Socket.IO
+server configuration.
+
+## 🤝 Multiplayer
+
+Arena Strike uses **Socket.IO** for real-time communication between
+players.
+
+The multiplayer server handles:
+
+-   Player connections
+-   Room management
+-   Real-time player updates
+-   Multiplayer game state communication
+-   Player disconnections
+
+## 📌 Project Status
+
+**🟢 Live and playable**
+
+The desktop version is deployed and the online multiplayer connection is
+operational.
+
+## 👨‍💻 Author
+
+**Rohit Patil**
+
+GitHub: [@rohp2205](https://github.com/rohp2205)
+
+------------------------------------------------------------------------
+
+⭐ If you like the project, consider giving the repository a star!
